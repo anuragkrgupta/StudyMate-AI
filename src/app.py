@@ -1,13 +1,29 @@
+
 import os
 import hashlib
 import streamlit as st
 from langchain_groq import ChatGroq
 
-# Load from Streamlit secrets first, then fall back to environment variables
+# ---------------------------------
+# Page Configuration
+# ---------------------------------
+
+st.set_page_config(
+    page_title="StudyMate AI",
+    page_icon="📚",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# ---------------------------------
+# Existing LLM Configuration
+# ---------------------------------
+
 api_key = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
+
 model = st.secrets.get(
     "GROQ_MODEL",
-    os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+    os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"),
 )
 
 llm = ChatGroq(
@@ -17,48 +33,120 @@ llm = ChatGroq(
 )
 
 # ---------------------------------
-# Page Configuration
-# ---------------------------------
-
-st.set_page_config(
-    page_title="AI PDF Assistant",
-    page_icon="📚",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-# ---------------------------------
-# Custom Styling
+# UI Styling Only
 # ---------------------------------
 
 st.markdown(
     """
-<style>
+    <style>
+    #MainMenu, footer {
+        visibility: hidden;
+    }
 
-#MainMenu {visibility: hidden;}
-footer {visibility: hidden;}
+    header[data-testid="stHeader"] {
+        background: transparent;
+    }
 
-.block-container {
-    padding-top: 1rem;
-}
+    .block-container {
+        padding-top: 1.8rem;
+        padding-bottom: 2rem;
+        max-width: 1200px;
+    }
 
-h1 {
-    text-align: center;
-}
+    [data-testid="stSidebar"] {
+        border-right: 1px solid rgba(128, 128, 128, 0.2);
+    }
 
-.stChatMessage {
-    border-radius: 15px;
-    padding: 12px;
-    margin-bottom: 10px;
-}
+    [data-testid="stSidebar"] .block-container {
+        padding-top: 1.5rem;
+    }
 
-</style>
-""",
+    .brand {
+        font-size: 1.65rem;
+        font-weight: 750;
+        letter-spacing: -0.8px;
+        margin-bottom: 0;
+    }
+
+    .brand-accent {
+        color: #7C83FD;
+    }
+
+    .muted {
+        opacity: 0.72;
+        font-size: 0.9rem;
+    }
+
+    .hero-title {
+        font-size: clamp(2rem, 4vw, 2.8rem);
+        font-weight: 750;
+        letter-spacing: -1.3px;
+        line-height: 1.15;
+        margin-bottom: 0.5rem;
+    }
+
+    .hero-subtitle {
+        font-size: 1rem;
+        opacity: 0.75;
+        margin-bottom: 1.2rem;
+    }
+
+    .section-label {
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 1.1px;
+        text-transform: uppercase;
+        opacity: 0.7;
+    }
+
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        border-radius: 16px;
+    }
+
+    div[data-testid="stChatMessage"] {
+        border-radius: 14px;
+        padding: 1rem;
+        margin-bottom: 0.7rem;
+    }
+
+    div[data-testid="stFileUploader"] {
+        border-radius: 12px;
+    }
+
+    .stButton > button {
+        border-radius: 10px;
+        font-weight: 600;
+        min-height: 2.7rem;
+        transition: border-color 0.15s ease;
+    }
+
+    .stButton > button:hover {
+        border-color: #7C83FD;
+    }
+
+    div[data-testid="stChatInput"] {
+        border-radius: 14px;
+    }
+
+    @media (max-width: 768px) {
+        .block-container {
+            padding-top: 1rem;
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
+
+        .hero-title {
+            letter-spacing: -0.7px;
+        }
+    }
+    </style>
+    """,
     unsafe_allow_html=True,
 )
 
+
 # ---------------------------------
-# Session State
+# Session State — Existing Keys
 # ---------------------------------
 
 if "messages" not in st.session_state:
@@ -84,74 +172,114 @@ def _file_id(name, data: bytes) -> str:
 # ---------------------------------
 
 with st.sidebar:
+    st.markdown(
+        """
+        <div class="brand">📚 StudyMate <span class="brand-accent">AI</span></div>
+        <p class="muted">Your personal study assistant</p>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    st.title("🤖 AI PDF Assistant")
+    st.divider()
 
-    st.markdown("---")
+    st.markdown("#### Workspace")
+    st.caption("Upload your notes, ask questions, and review key concepts.")
+
+    if st.session_state.document_ready and st.session_state.current_doc_name:
+        st.success("Document ready")
+        st.markdown(f"**📄 {st.session_state.current_doc_name}**")
+    else:
+        st.info("No document loaded")
+        st.caption("Upload a PDF to get started.")
+
+    st.divider()
+
+    st.markdown("#### What you can do")
 
     st.markdown(
         """
-### Features
-
-✅ Upload any PDF
-
-✅ Chat with PDF
-
-✅ AI Summary
-
-✅ Source References
-
-⚡ Powered by Groq
-
-"""
+        - 💬 Ask questions about your PDF
+        - 📝 Generate structured summaries
+        - 🔎 Inspect answer sources
+        - ✍️ Process scanned handwritten notes
+        """
     )
 
-    st.markdown("---")
+    st.divider()
 
-    if st.session_state.document_ready and st.session_state.current_doc_name:
-        st.info(f"📄 Active: **{st.session_state.current_doc_name}**")
-    else:
-        st.caption("No document loaded yet.")
-
-    st.markdown("---")
-
-    if st.button("🗑 Clear Chat"):
+    if st.button("🗑️ Clear chat history", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
 
     st.markdown("---")
+    st.caption("Powered by Groq · LangChain · FAISS")
+    st.caption("Handwriting OCR runs locally when needed.")
 
-    st.caption("Powered by Groq + FAISS + MiniLM")
 
 # ---------------------------------
 # Main Header
 # ---------------------------------
 
-st.title("📚 AI PDF Assistant")
-
-st.caption("Upload a PDF below — no backend access needed.")
-
-# ---------------------------------
-# PDF Upload (frontend only)
-# ---------------------------------
-
-uploaded_file = st.file_uploader(
-    "Upload a PDF",
-    type=["pdf"],
-    help="Select a PDF from your computer. It is processed in this session only.",
+st.markdown(
+    '<div class="hero-title">Learn smarter. <span class="brand-accent">Study better.</span></div>',
+    unsafe_allow_html=True,
 )
+
+st.markdown(
+    '<div class="hero-subtitle">Your documents, simplified. Upload your study material and let AI help you understand it.</div>',
+    unsafe_allow_html=True,
+)
+
+# ---------------------------------
+# Document Upload
+# ---------------------------------
+
+st.markdown('<div class="section-label">YOUR DOCUMENT</div>', unsafe_allow_html=True)
+st.write("")
+
+with st.container(border=True):
+    upload_col, status_col = st.columns([1.7, 1], gap="large")
+
+    with upload_col:
+        st.markdown("### 📄 Upload study material")
+        st.caption("Choose a PDF containing lecture notes, textbooks, reports, or scanned handwritten notes.")
+
+        uploaded_file = st.file_uploader(
+            "Choose a PDF file",
+            type=["pdf"],
+            help="The PDF is processed by your existing local ingestion pipeline.",
+            label_visibility="collapsed",
+        )
+
+    with status_col:
+        st.markdown("### ✨ Ready to study?")
+
+        if st.session_state.document_ready and st.session_state.current_doc_name:
+            st.success("Your document is indexed and ready.")
+            st.caption(f"Active file: {st.session_state.current_doc_name}")
+        else:
+            st.markdown(
+                """
+                **Start with a PDF**
+
+                Upload a document to unlock document chat, summaries, and source references.
+                """
+            )
+
+        st.caption("Scanned handwriting is handled by your existing local OCR fallback when applicable.")
+
 
 if uploaded_file is not None:
     pdf_bytes = uploaded_file.getvalue()
     file_id = _file_id(uploaded_file.name, pdf_bytes)
 
     if file_id != st.session_state.processed_file_id:
-
         with st.spinner("🔄 Reading and indexing your PDF..."):
             try:
                 from ingest import ingest_pdf
                 from retriever import reload
 
+                # Existing ingestion and vector-store workflow.
                 chunk_count = ingest_pdf(pdf_bytes)
                 reload()
 
@@ -166,22 +294,51 @@ if uploaded_file is not None:
                 st.stop()
 
         st.success(
-            f"✅ **{uploaded_file.name}** ready — "
+            f"**{uploaded_file.name}** is ready — "
             f"{chunk_count} sections indexed. You can ask questions now."
         )
 
     elif st.session_state.document_ready:
         st.success(f"📄 **{uploaded_file.name}** is loaded and ready.")
 
+
 # ---------------------------------
-# PDF Summary
+# Study Tools
 # ---------------------------------
 
-if st.button(
-    "📄 Generate Document Summary",
-    use_container_width=True,
-):
+st.write("")
+st.markdown('<div class="section-label">STUDY TOOLS</div>', unsafe_allow_html=True)
+st.write("")
 
+summary_col, chat_col = st.columns([1, 1], gap="medium")
+
+with summary_col:
+    with st.container(border=True):
+        st.markdown("### 📝 Document summary")
+        st.caption("Turn lengthy notes into structured, easy-to-review points.")
+
+        generate_summary = st.button(
+            "Generate summary",
+            use_container_width=True,
+            type="primary",
+        )
+
+with chat_col:
+    with st.container(border=True):
+        st.markdown("### 💬 Ask your document")
+        st.caption("Ask questions and get answers grounded in your uploaded material.")
+
+        if st.session_state.document_ready:
+            st.success("Question answering is available.")
+        else:
+            st.caption("Upload a PDF to begin asking questions.")
+
+
+# ---------------------------------
+# PDF Summary — Existing Logic
+# ---------------------------------
+
+if generate_summary:
     if not st.session_state.document_ready:
         st.warning("Please upload a PDF first.")
     else:
@@ -214,12 +371,40 @@ Document:
 
         with st.spinner("Generating summary..."):
             response = llm.invoke(prompt)
-            st.subheader("📄 Document Summary")
+
+        st.markdown("### 📄 Document Summary")
+
+        with st.container(border=True):
             st.markdown(response.content)
 
 
 # ---------------------------------
-# Display Chat History
+# Chat Workspace
+# ---------------------------------
+
+st.write("")
+st.markdown('<div class="section-label">DOCUMENT CONVERSATION</div>', unsafe_allow_html=True)
+st.write("")
+
+if not st.session_state.document_ready:
+    with st.container(border=True):
+        st.markdown("### 👋 Welcome to StudyMate AI")
+        st.write("Your study session starts with a document.")
+
+        st.markdown(
+            """
+            **Try this workflow:**
+
+            1. Upload a PDF above.
+            2. Generate a summary of the important concepts.
+            3. Ask questions and inspect the sources behind each answer.
+            """
+        )
+else:
+    st.caption(f"Chatting with: {st.session_state.current_doc_name}")
+
+# ---------------------------------
+# Display Chat History — Existing Logic
 # ---------------------------------
 
 for message in st.session_state.messages:
@@ -229,14 +414,14 @@ for message in st.session_state.messages:
     ):
         st.markdown(message["content"])
 
+
 # ---------------------------------
-# Chat Input
+# Chat Input — Existing Logic
 # ---------------------------------
 
 question = st.chat_input("Ask a question about your PDF...")
 
 if question:
-
     if not st.session_state.document_ready:
         st.warning("Please upload a PDF before asking questions.")
     else:
@@ -253,7 +438,7 @@ if question:
             chunks = retrieve(question)
 
         context = "\n\n".join(chunks)
-        
+
         chat_history = "\n".join(
             [
                 f"{msg['role']}: {msg['content']}"
@@ -284,7 +469,6 @@ I could not find that information in the document.
 
         with st.spinner("Generating answer..."):
             response = llm.invoke(prompt)
-
             answer = response.content
 
         st.session_state.messages.append(
