@@ -7,7 +7,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 
-from config import VECTORSTORE_DIR, EMBEDDING_MODEL
+from config import VECTORSTORE_DIR, EMBEDDING_MODEL, get_vectorstore_dir
 
 MAX_OCR_PAGES = 10
 
@@ -47,7 +47,7 @@ def _get_pdf_bytes(source):
             source.seek(position)
 
 
-def ingest_pdf(source) -> int:
+def ingest_pdf(source, doc_id: str | None = None) -> int:
     """
     Build a LangChain FAISS vector store from a PDF.
 
@@ -141,8 +141,20 @@ def ingest_pdf(source) -> int:
         embedding=embeddings,
     )
 
-    os.makedirs(VECTORSTORE_DIR, exist_ok=True)
-    vectorstore.save_local(VECTORSTORE_DIR)
+    target_dir = get_vectorstore_dir(doc_id, root_dir=VECTORSTORE_DIR)
+    os.makedirs(target_dir, exist_ok=True)
+    vectorstore.save_local(target_dir)
+
+    # Cryptographically sign the newly created index files for integrity verification
+    try:
+        from security import sign_vectorstore_index
+        sign_vectorstore_index(target_dir)
+    except Exception:
+        # If save_local was mocked in unit tests and didn't write physical files, ignore
+        if not (os.path.exists(os.path.join(target_dir, "index.pkl")) and os.path.exists(os.path.join(target_dir, "index.faiss"))):
+            pass
+        else:
+            raise
 
     return len(chunks)
 

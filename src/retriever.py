@@ -7,16 +7,19 @@ from config import (
     VECTORSTORE_DIR,
     EMBEDDING_MODEL,
     RETRIEVAL_K,
+    get_vectorstore_dir,
 )
 
 _vectorstore = None
+_vectorstores = {}
 _embeddings = None
 
 
-def vectorstore_exists():
+def vectorstore_exists(doc_id: str | None = None):
+    target_dir = get_vectorstore_dir(doc_id, root_dir=VECTORSTORE_DIR)
     return os.path.exists(
         os.path.join(
-            VECTORSTORE_DIR,
+            target_dir,
             "index.faiss",
         )
     )
@@ -33,58 +36,81 @@ def _get_embeddings():
     return _embeddings
 
 
-def _load():
+def _load(doc_id: str | None = None):
     global _vectorstore
 
-    if _vectorstore is not None:
-        return
+    target_dir = get_vectorstore_dir(doc_id, root_dir=VECTORSTORE_DIR)
+    cache_key = target_dir
 
-    if not vectorstore_exists():
+    if doc_id is None and _vectorstore is not None:
+        return _vectorstore
+
+    if cache_key in _vectorstores:
+        if doc_id is None:
+            _vectorstore = _vectorstores[cache_key]
+        return _vectorstores[cache_key]
+
+    if not vectorstore_exists(doc_id):
+        doc_msg = f" for document '{doc_id}'" if doc_id else ""
         raise FileNotFoundError(
-            "No vector store found. Upload a PDF first."
+            f"No vector store found{doc_msg}. Upload a PDF first."
         )
 
-    _vectorstore = FAISS.load_local(
-        VECTORSTORE_DIR,
+    # Cryptographically verify index integrity and authenticity BEFORE deserializing pickle
+    from security import verify_vectorstore_index
+    verify_vectorstore_index(target_dir)
+
+    vs = FAISS.load_local(
+        target_dir,
         _get_embeddings(),
         allow_dangerous_deserialization=True,
     )
+    _vectorstores[cache_key] = vs
+    if doc_id is None:
+        _vectorstore = vs
+    return vs
 
 
-def reload():
+def reload(doc_id: str | None = None):
     global _vectorstore
 
-    _vectorstore = None
-    _load()
+    target_dir = get_vectorstore_dir(doc_id, root_dir=VECTORSTORE_DIR)
+    cache_key = target_dir
+
+    _vectorstores.pop(cache_key, None)
+    if doc_id is None:
+        _vectorstore = None
+
+    return _load(doc_id)
 
 
-def get_all_chunks():
-    _load()
+def get_all_chunks(doc_id: str | None = None):
+    vs = _load(doc_id)
 
-    if _vectorstore is None:
+    if vs is None:
         return []
 
     # FAISS maintains index_to_docstore_id where integer keys correspond to insertion order
-    if hasattr(_vectorstore, "index_to_docstore_id") and _vectorstore.index_to_docstore_id:
+    if hasattr(vs, "index_to_docstore_id") and vs.index_to_docstore_id:
         try:
             sorted_indices = sorted(
-                _vectorstore.index_to_docstore_id.keys(),
+                vs.index_to_docstore_id.keys(),
                 key=lambda x: int(x) if str(x).isdigit() else str(x),
             )
         except Exception:
-            sorted_indices = list(_vectorstore.index_to_docstore_id.keys())
+            sorted_indices = list(vs.index_to_docstore_id.keys())
 
         ordered_ids = [
-            _vectorstore.index_to_docstore_id[idx]
+            vs.index_to_docstore_id[idx]
             for idx in sorted_indices
         ]
 
-        if hasattr(_vectorstore, "get_by_ids"):
-            docs = _vectorstore.get_by_ids(ordered_ids)
+        if hasattr(vs, "get_by_ids"):
+            docs = vs.get_by_ids(ordered_ids)
         else:
             docs = [
-                _vectorstore.docstore.search(doc_id)
-                for doc_id in ordered_ids
+                vs.docstore.search(doc_id_key)
+                for doc_id_key in ordered_ids
             ]
 
         chunks = []
@@ -96,9 +122,9 @@ def get_all_chunks():
         return chunks
 
     # Fallback to docstore values if index_to_docstore_id is not present or empty
-    if hasattr(_vectorstore, "docstore") and hasattr(_vectorstore.docstore, "_dict"):
+    if hasattr(vs, "docstore") and hasattr(vs.docstore, "_dict"):
         chunks = []
-        for doc in _vectorstore.docstore._dict.values():
+        for doc in vs.docstore._dict.values():
             if hasattr(doc, "page_content"):
                 chunks.append(doc.page_content)
             elif isinstance(doc, str) and not doc.startswith("ID "):
@@ -110,11 +136,19 @@ def get_all_chunks():
 
 def retrieve(
     query,
-    k=RETRIEVAL_K,
+    doc_id=None,
+    k=None,
 ):
-    _load()
+    # Handle backward-compatible positional k call: retrieve(query, k)
+    if isinstance(doc_id, int) and k is None:
+        k = doc_id
+        doc_id = None
+    if k is None:
+        k = RETRIEVAL_K
 
-    docs = _vectorstore.similarity_search(
+    vs = _load(doc_id)
+
+    docs = vs.similarity_search(
         query,
         k=k,
     )

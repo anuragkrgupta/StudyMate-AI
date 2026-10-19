@@ -21,6 +21,12 @@ class TestRealOcrEndToEnd(unittest.TestCase):
     and real HuggingFace embeddings / FAISS on a mixed PDF.
     """
 
+    def setUp(self):
+        os.environ.setdefault(
+            "STUDYMATE_INDEX_SIGNING_KEY",
+            "test-signing-key-for-automated-regression-tests-only-32chars",
+        )
+
     def test_e2e_mixed_pdf_with_real_ocr_model(self):
         # 1. Create a 2-page mixed PDF:
         # Page 1: Selectable text
@@ -51,6 +57,7 @@ class TestRealOcrEndToEnd(unittest.TestCase):
                 self.assertGreater(chunk_count, 0)
                 self.assertTrue(os.path.exists(os.path.join(tmpdir, "index.faiss")))
                 self.assertTrue(os.path.exists(os.path.join(tmpdir, "index.pkl")))
+                self.assertTrue(os.path.exists(os.path.join(tmpdir, "index.sig")))
             finally:
                 ingest.VECTORSTORE_DIR = orig_dir
 

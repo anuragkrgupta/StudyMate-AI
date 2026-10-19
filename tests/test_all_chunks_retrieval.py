@@ -28,6 +28,10 @@ class TestAllChunksRetrieval(unittest.TestCase):
     """
 
     def setUp(self):
+        os.environ.setdefault(
+            "STUDYMATE_INDEX_SIGNING_KEY",
+            "test-signing-key-for-automated-regression-tests-only-32chars",
+        )
         self.temp_dir = tempfile.mkdtemp()
         self.fake_embeddings = FakeEmbeddings(size=10)
 
@@ -52,6 +56,8 @@ class TestAllChunksRetrieval(unittest.TestCase):
         """Helper to create and persist a FAISS index with the given text chunks."""
         vs = FAISS.from_texts(chunks, self.fake_embeddings)
         vs.save_local(self.temp_dir)
+        from security import sign_vectorstore_index
+        sign_vectorstore_index(self.temp_dir)
         return vs
 
     # -------------------------------------------------------------------------
@@ -165,6 +171,8 @@ class TestAllChunksRetrieval(unittest.TestCase):
             {},
         )
         empty_vs.save_local(self.temp_dir)
+        from security import sign_vectorstore_index
+        sign_vectorstore_index(self.temp_dir)
 
         retrieved = get_all_chunks()
 

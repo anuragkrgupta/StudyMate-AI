@@ -4,6 +4,11 @@ import hashlib
 import streamlit as st
 from langchain_groq import ChatGroq
 
+from security import load_env_file
+
+# Load local .env file if present
+load_env_file()
+
 # ---------------------------------
 # Page Configuration
 # ---------------------------------
@@ -315,9 +320,9 @@ if uploaded_file is not None:
                 from ingest import ingest_pdf
                 from retriever import reload
 
-                # Existing ingestion and vector-store workflow.
-                chunk_count = ingest_pdf(pdf_bytes)
-                reload()
+                # Document-isolated ingestion and vector-store workflow.
+                chunk_count = ingest_pdf(pdf_bytes, doc_id=file_id)
+                reload(doc_id=file_id)
 
                 st.session_state.processed_file_id = file_id
                 st.session_state.document_ready = True
@@ -385,7 +390,7 @@ if generate_summary:
         from retriever import get_all_chunks
 
         try:
-            all_chunks = get_all_chunks()
+            all_chunks = get_all_chunks(doc_id=st.session_state.processed_file_id)
             context = "\n\n".join(all_chunks)[:12000]
 
             with st.spinner("Generating summary..."):
@@ -467,7 +472,7 @@ if question:
             st.markdown(question)
 
         with st.spinner("Searching document..."):
-            chunks = retrieve(question)
+            chunks = retrieve(question, doc_id=st.session_state.processed_file_id)
 
         context = "\n\n".join(chunks)
 
