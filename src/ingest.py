@@ -1,14 +1,15 @@
-
 from io import BytesIO
 from pathlib import Path
 import os
 
-from pypdf import PdfReader
+from pypdf import PdfReader, PdfWriter
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 
 from config import VECTORSTORE_DIR, EMBEDDING_MODEL
+
+MAX_OCR_PAGES = 10
 
 
 def _read_pdf(source):
@@ -17,6 +18,9 @@ def _read_pdf(source):
 
     if isinstance(source, bytes):
         return PdfReader(BytesIO(source))
+
+    if hasattr(source, "seek"):
+        source.seek(0)
 
     return PdfReader(source)
 
@@ -47,38 +51,74 @@ def ingest_pdf(source) -> int:
     """
     Build a LangChain FAISS vector store from a PDF.
 
-    Uses normal PDF text extraction first, then local handwriting
-    OCR if no selectable text is found.
+    Processes each page independently:
+    - Uses normal selectable-text extraction first.
+    - Runs local handwriting OCR on individual pages lacking selectable text.
+    - Enforces an OCR safety limit (at most 10 pages requiring OCR).
+    - Rejects incomplete ingestion if OCR returns empty text for any scanned page.
     """
     reader = _read_pdf(source)
-    text_parts = []
+    if not reader.pages:
+        raise ValueError("The PDF document contains no pages.")
 
-    for page in reader.pages:
+    # Identify which pages have selectable text and which need OCR
+    selectable_texts = {}
+    ocr_page_indices = []
+
+    for idx, page in enumerate(reader.pages):
         text = page.extract_text()
         if text and text.strip():
-            text_parts.append(text)
+            selectable_texts[idx] = text
+        else:
+            ocr_page_indices.append(idx)
+
+    # Enforce OCR page limit explicitly on pages requiring OCR
+    if len(ocr_page_indices) > MAX_OCR_PAGES:
+        raise ValueError(
+            f"PDF has {len(ocr_page_indices)} pages requiring OCR. "
+            f"Please upload a PDF with at most {MAX_OCR_PAGES} pages requiring OCR, "
+            f"or split the document into smaller parts."
+        )
+
+    text_parts = []
+
+    for idx, page in enumerate(reader.pages):
+        page_num = idx + 1
+        if idx in selectable_texts:
+            text_parts.append(selectable_texts[idx])
+        else:
+            print(f"Page {page_num}: No selectable text found. Running local handwriting OCR...")
+            try:
+                from handwriting_ocr import recognize_handwritten_pdf
+
+                writer = PdfWriter()
+                writer.add_page(page)
+                page_buf = BytesIO()
+                writer.write(page_buf)
+                page_bytes = page_buf.getvalue()
+
+                recognized_text = recognize_handwritten_pdf(
+                    page_bytes,
+                    max_pages=MAX_OCR_PAGES,
+                    page_number_offset=idx,
+                )
+            except Exception as exc:
+                raise ValueError(
+                    f"Local handwriting recognition failed on page {page_num}: {exc}"
+                ) from exc
+
+            if not recognized_text or not recognized_text.strip():
+                raise ValueError(
+                    f"Local handwriting recognition returned no text on page {page_num}. "
+                    "Try a clearer scanned PDF."
+                )
+
+            text_parts.append(recognized_text)
 
     full_text = "\n\n".join(text_parts).strip()
 
-    # OCR fallback for fully scanned or handwritten PDFs.
     if not full_text:
-        print("No selectable text found. Starting local handwriting OCR...")
-
-        try:
-            from handwriting_ocr import recognize_handwritten_pdf
-
-            full_text = recognize_handwritten_pdf(_get_pdf_bytes(source))
-        except Exception as exc:
-            raise ValueError(
-                f"Local handwriting recognition failed: {exc}"
-            ) from exc
-
-        if not full_text or not full_text.strip():
-            raise ValueError(
-                "No text could be recognized. Try a clearer scanned PDF."
-            )
-
-        print("Handwriting OCR completed successfully.")
+        raise ValueError("No usable text was found in the PDF.")
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=1500,

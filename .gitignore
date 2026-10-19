@@ -15,3 +15,5 @@ vectorstore/
 
 *.bin
 *.pkl
+
+reports

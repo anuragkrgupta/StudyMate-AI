@@ -61,15 +61,51 @@ def reload():
 def get_all_chunks():
     _load()
 
-    docs = _vectorstore.similarity_search(
-        "",
-        k=100,
-    )
+    if _vectorstore is None:
+        return []
 
-    return [
-        doc.page_content
-        for doc in docs
-    ]
+    # FAISS maintains index_to_docstore_id where integer keys correspond to insertion order
+    if hasattr(_vectorstore, "index_to_docstore_id") and _vectorstore.index_to_docstore_id:
+        try:
+            sorted_indices = sorted(
+                _vectorstore.index_to_docstore_id.keys(),
+                key=lambda x: int(x) if str(x).isdigit() else str(x),
+            )
+        except Exception:
+            sorted_indices = list(_vectorstore.index_to_docstore_id.keys())
+
+        ordered_ids = [
+            _vectorstore.index_to_docstore_id[idx]
+            for idx in sorted_indices
+        ]
+
+        if hasattr(_vectorstore, "get_by_ids"):
+            docs = _vectorstore.get_by_ids(ordered_ids)
+        else:
+            docs = [
+                _vectorstore.docstore.search(doc_id)
+                for doc_id in ordered_ids
+            ]
+
+        chunks = []
+        for doc in docs:
+            if hasattr(doc, "page_content"):
+                chunks.append(doc.page_content)
+            elif isinstance(doc, str) and not doc.startswith("ID "):
+                chunks.append(doc)
+        return chunks
+
+    # Fallback to docstore values if index_to_docstore_id is not present or empty
+    if hasattr(_vectorstore, "docstore") and hasattr(_vectorstore.docstore, "_dict"):
+        chunks = []
+        for doc in _vectorstore.docstore._dict.values():
+            if hasattr(doc, "page_content"):
+                chunks.append(doc.page_content)
+            elif isinstance(doc, str) and not doc.startswith("ID "):
+                chunks.append(doc)
+        return chunks
+
+    return []
 
 
 def retrieve(

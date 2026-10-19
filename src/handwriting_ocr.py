@@ -1,4 +1,3 @@
-from langsmith.types.sandboxes import box_delete_service_url_params
 import cv2
 import numpy as np
 import pymupdf
@@ -104,8 +103,20 @@ def detect_text_lines(page_image):
     return crops
 
 
-def recognize_handwritten_pdf(pdf_bytes, max_pages=10):
-    """Extract handwritten text from a scanned PDF locally."""
+def recognize_handwritten_pdf(pdf_bytes, max_pages=10, page_number_offset=0):
+    """
+    Extract handwritten text from a scanned PDF locally.
+
+    Args:
+        pdf_bytes (bytes): Raw bytes of the PDF to recognize.
+        max_pages (int, optional): Maximum number of pages allowed for OCR. Defaults to 10.
+        page_number_offset (int, optional): Zero-based offset added to page
+            numbers in the output (e.g., page_number_offset=3 labels the first page
+            in pdf_bytes as Page 4). Defaults to 0.
+
+    Returns:
+        str: Extracted and recognized text from all processed pages.
+    """
     processor, model, device = load_handwriting_model()
     results = []
 
@@ -116,7 +127,7 @@ def recognize_handwritten_pdf(pdf_bytes, max_pages=10):
                 f"Please upload a PDF with at most {max_pages} pages."
             )
 
-        for page_number, page in enumerate(document, start=1):
+        for page_number, page in enumerate(document, start=1 + page_number_offset):
             # Render at 200 DPI for handwriting recognition.
             pixmap = page.get_pixmap(dpi=200, alpha=False)
             page_image = Image.frombytes(

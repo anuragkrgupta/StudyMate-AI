@@ -161,10 +161,46 @@ if "document_ready" not in st.session_state:
 if "current_doc_name" not in st.session_state:
     st.session_state.current_doc_name = None
 
+if "summary" not in st.session_state:
+    st.session_state.summary = None
+
+if "summary_file_id" not in st.session_state:
+    st.session_state.summary_file_id = None
+
 
 def _file_id(name, data: bytes) -> str:
     digest = hashlib.sha256(data).hexdigest()[:16]
     return f"{name}:{digest}"
+
+
+def generate_document_summary(llm_client, context: str) -> str:
+    """Generate a structured document summary using the configured LLM."""
+    prompt = f"""
+Analyze this document and create a structured summary.
+
+If it is lecture notes:
+- Main topic
+- Key concepts
+- Important formulas
+
+If it is a notice:
+- Purpose
+- Important dates
+- Key instructions
+
+If it is a report:
+- Objective
+- Findings
+- Conclusions
+
+Document:
+{context}
+"""
+    response = llm_client.invoke(prompt)
+    content = response.content if hasattr(response, "content") else str(response)
+    if not content or not content.strip():
+        raise ValueError("The model returned an empty response.")
+    return content.strip()
 
 
 # ---------------------------------
@@ -287,9 +323,13 @@ if uploaded_file is not None:
                 st.session_state.document_ready = True
                 st.session_state.current_doc_name = uploaded_file.name
                 st.session_state.messages = []
+                st.session_state.summary = None
+                st.session_state.summary_file_id = None
 
             except Exception as exc:
                 st.session_state.document_ready = False
+                st.session_state.summary = None
+                st.session_state.summary_file_id = None
                 st.error(f"❌ Failed to process PDF: {exc}")
                 st.stop()
 
@@ -344,38 +384,30 @@ if generate_summary:
     else:
         from retriever import get_all_chunks
 
-        all_chunks = get_all_chunks()
-        context = "\n\n".join(all_chunks)[:12000]
+        try:
+            all_chunks = get_all_chunks()
+            context = "\n\n".join(all_chunks)[:12000]
 
-        prompt = f"""
-Analyze this document and create a structured summary.
+            with st.spinner("Generating summary..."):
+                summary_text = generate_document_summary(llm, context)
 
-If it is lecture notes:
-- Main topic
-- Key concepts
-- Important formulas
+            st.session_state.summary = summary_text
+            st.session_state.summary_file_id = st.session_state.processed_file_id
 
-If it is a notice:
-- Purpose
-- Important dates
-- Key instructions
+        except Exception as exc:
+            st.session_state.summary = None
+            st.session_state.summary_file_id = None
+            st.error(f"Failed to generate summary: {exc}")
 
-If it is a report:
-- Objective
-- Findings
-- Conclusions
+if (
+    st.session_state.document_ready
+    and st.session_state.summary
+    and st.session_state.summary_file_id == st.session_state.processed_file_id
+):
+    st.markdown("### 📄 Document Summary")
 
-Document:
-{context}
-"""
-
-        with st.spinner("Generating summary..."):
-            response = llm.invoke(prompt)
-
-        st.markdown("### 📄 Document Summary")
-
-        with st.container(border=True):
-            st.markdown(response.content)
+    with st.container(border=True):
+        st.markdown(st.session_state.summary)
 
 
 # ---------------------------------
