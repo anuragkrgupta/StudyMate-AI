@@ -31,9 +31,20 @@ model = st.secrets.get(
     os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"),
 )
 
-llm = ChatGroq(
-    api_key=api_key,
+
+@st.cache_resource
+def get_llm(model: str, api_key: str | None = None, temperature: float = 0.0) -> ChatGroq:
+    """Return a cached ChatGroq client for the given configuration."""
+    return ChatGroq(
+        api_key=api_key,
+        model=model,
+        temperature=temperature,
+    )
+
+
+llm = get_llm(
     model=model,
+    api_key=api_key,
     temperature=0,
 )
 

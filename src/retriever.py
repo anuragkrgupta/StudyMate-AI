@@ -14,6 +14,8 @@ from config import (
 _vectorstore = None
 _vectorstores = {}
 _embeddings = None
+_embeddings_cache = {}
+_ORIGINAL_HUGGINGFACE_EMBEDDINGS = HuggingFaceEmbeddings
 
 
 def vectorstore_exists(doc_id: str | None = None):
@@ -26,15 +28,36 @@ def vectorstore_exists(doc_id: str | None = None):
     )
 
 
-def _get_embeddings():
-    global _embeddings
+def get_embeddings(model_name: str | None = None) -> HuggingFaceEmbeddings:
+    """Retrieve or initialize a cached HuggingFaceEmbeddings wrapper for the given model."""
+    global _embeddings, _embeddings_cache
+    resolved_model = model_name or EMBEDDING_MODEL
 
-    if _embeddings is None:
-        _embeddings = HuggingFaceEmbeddings(
-            model_name=EMBEDDING_MODEL
+    # If module global _embeddings was explicitly set (e.g. in tests), honor it
+    if _embeddings is not None and (model_name is None or model_name == EMBEDDING_MODEL):
+        return _embeddings
+
+    cache_key = (resolved_model, HuggingFaceEmbeddings)
+    if cache_key not in _embeddings_cache:
+        _embeddings_cache[cache_key] = HuggingFaceEmbeddings(
+            model_name=resolved_model
         )
 
-    return _embeddings
+    cached = _embeddings_cache[cache_key]
+    if model_name is None or model_name == EMBEDDING_MODEL:
+        _embeddings = cached
+    return cached
+
+
+def _get_embeddings(model_name: str | None = None):
+    return get_embeddings(model_name)
+
+
+def clear_embeddings_cache():
+    """Clear cached embeddings instances (primarily for test isolation)."""
+    global _embeddings, _embeddings_cache
+    _embeddings = None
+    _embeddings_cache.clear()
 
 
 def _load(doc_id: str | None = None):

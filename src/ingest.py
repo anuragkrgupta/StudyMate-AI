@@ -11,6 +11,51 @@ from config import VECTORSTORE_DIR, EMBEDDING_MODEL, get_vectorstore_dir
 
 MAX_OCR_PAGES = 10
 
+_embeddings = None
+_embeddings_cache = {}
+_ORIGINAL_HUGGINGFACE_EMBEDDINGS = HuggingFaceEmbeddings
+
+
+def get_embeddings(model_name: str | None = None) -> HuggingFaceEmbeddings:
+    """Retrieve or initialize a cached HuggingFaceEmbeddings wrapper for the given model."""
+    global _embeddings, _embeddings_cache
+    resolved_model = model_name or EMBEDDING_MODEL
+
+    # If module global _embeddings was explicitly set (e.g. by unit tests), honor it
+    if _embeddings is not None and (model_name is None or model_name == EMBEDDING_MODEL):
+        return _embeddings
+
+    # If HuggingFaceEmbeddings has been mocked or replaced in this module, invoke the mock directly
+    if HuggingFaceEmbeddings is not _ORIGINAL_HUGGINGFACE_EMBEDDINGS:
+        cache_key = (resolved_model, HuggingFaceEmbeddings)
+        if cache_key not in _embeddings_cache:
+            _embeddings_cache[cache_key] = HuggingFaceEmbeddings(model_name=resolved_model)
+        cached = _embeddings_cache[cache_key]
+        if model_name is None or model_name == EMBEDDING_MODEL:
+            _embeddings = cached
+        return cached
+
+    try:
+        from retriever import get_embeddings as _retriever_get_embeddings
+        return _retriever_get_embeddings(resolved_model)
+    except Exception:
+        cache_key = (resolved_model, HuggingFaceEmbeddings)
+        if cache_key not in _embeddings_cache:
+            _embeddings_cache[cache_key] = HuggingFaceEmbeddings(
+                model_name=resolved_model
+            )
+        cached = _embeddings_cache[cache_key]
+        if model_name is None or model_name == EMBEDDING_MODEL:
+            _embeddings = cached
+        return cached
+
+
+def clear_embeddings_cache():
+    """Clear cached embeddings instances (primarily for test isolation)."""
+    global _embeddings, _embeddings_cache
+    _embeddings = None
+    _embeddings_cache.clear()
+
 
 def _read_pdf(source):
     if isinstance(source, (str, Path)):
@@ -158,8 +203,8 @@ def ingest_pdf(
 
     print(f"Total Chunks: {len(all_chunks)}")
 
-    embeddings = HuggingFaceEmbeddings(
-        model_name=EMBEDDING_MODEL
+    embeddings = get_embeddings(
+        EMBEDDING_MODEL
     )
 
     vectorstore = FAISS.from_texts(
