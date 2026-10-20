@@ -17,6 +17,16 @@ FAISS_INDEX_PATH = os.path.join(VECTORSTORE_DIR, "faiss_index.bin")
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"    
 RETRIEVAL_K = 4
 
+DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
+
+
+def get_groq_model() -> str:
+    """Return the configured Groq model, falling back to DEFAULT_GROQ_MODEL."""
+    return os.getenv("GROQ_MODEL") or DEFAULT_GROQ_MODEL
+
+
+CHAT_MODEL = get_groq_model()
+
 
 def sanitize_doc_id(doc_id: str) -> str:
     """Return a filesystem-safe directory name for a document identifier."""

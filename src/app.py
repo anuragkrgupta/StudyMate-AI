@@ -5,6 +5,7 @@ import streamlit as st
 from langchain_groq import ChatGroq
 
 from security import load_env_file
+from config import DEFAULT_GROQ_MODEL
 
 # Load local .env file if present
 load_env_file()
@@ -26,9 +27,10 @@ st.set_page_config(
 
 api_key = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
 
-model = st.secrets.get(
-    "GROQ_MODEL",
-    os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"),
+model = (
+    st.secrets.get("GROQ_MODEL")
+    or os.getenv("GROQ_MODEL")
+    or DEFAULT_GROQ_MODEL
 )
 
 

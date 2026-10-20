@@ -87,8 +87,8 @@ class TestModelInitializationOptimization(unittest.TestCase):
     # -------------------------------------------------------------------------
     def test_a_llm_client_reuse(self):
         """Repeated access with unchanged configuration reuses the same client instance."""
-        client1 = get_llm(model="llama-3.3-70b-versatile", api_key="gsk_test_key_1", temperature=0.0)
-        client2 = get_llm(model="llama-3.3-70b-versatile", api_key="gsk_test_key_1", temperature=0.0)
+        client1 = get_llm(model="openai/gpt-oss-120b", api_key="gsk_test_key_1", temperature=0.0)
+        client2 = get_llm(model="openai/gpt-oss-120b", api_key="gsk_test_key_1", temperature=0.0)
 
         self.assertIs(
             client1,
@@ -101,7 +101,7 @@ class TestModelInitializationOptimization(unittest.TestCase):
     # -------------------------------------------------------------------------
     def test_b_llm_configuration_changes(self):
         """Changing model, api_key, or temperature returns distinct client instances."""
-        base_client = get_llm(model="llama-3.3-70b-versatile", api_key="gsk_test_key_1", temperature=0.0)
+        base_client = get_llm(model="openai/gpt-oss-120b", api_key="gsk_test_key_1", temperature=0.0)
 
         # Different model
         diff_model_client = get_llm(model="mixtral-8x7b-32768", api_key="gsk_test_key_1", temperature=0.0)
@@ -112,7 +112,7 @@ class TestModelInitializationOptimization(unittest.TestCase):
         )
 
         # Different API key
-        diff_key_client = get_llm(model="llama-3.3-70b-versatile", api_key="gsk_test_key_2", temperature=0.0)
+        diff_key_client = get_llm(model="openai/gpt-oss-120b", api_key="gsk_test_key_2", temperature=0.0)
         self.assertIsNot(
             base_client,
             diff_key_client,
@@ -120,7 +120,7 @@ class TestModelInitializationOptimization(unittest.TestCase):
         )
 
         # Different temperature
-        diff_temp_client = get_llm(model="llama-3.3-70b-versatile", api_key="gsk_test_key_1", temperature=0.7)
+        diff_temp_client = get_llm(model="openai/gpt-oss-120b", api_key="gsk_test_key_1", temperature=0.7)
         self.assertIsNot(
             base_client,
             diff_temp_client,
@@ -227,7 +227,7 @@ class TestModelInitializationOptimization(unittest.TestCase):
         # 1. ChatGroq constructor frequency test
         with patch("langchain_groq.ChatGroq.__init__", return_value=None) as mock_groq_init:
             for _ in range(5):
-                get_llm(model="llama-3.3-70b-versatile", api_key="test_key_freq", temperature=0.0)
+                get_llm(model="openai/gpt-oss-120b", api_key="test_key_freq", temperature=0.0)
             self.assertEqual(
                 mock_groq_init.call_count,
                 1,
@@ -255,7 +255,7 @@ class TestModelInitializationOptimization(unittest.TestCase):
     # -------------------------------------------------------------------------
     def test_h_existing_application_behavior(self):
         """Chat generation, summarization, and prompt building operate normally with cached client."""
-        client = get_llm(model="llama-3.3-70b-versatile", api_key="gsk_test_key_app", temperature=0.0)
+        client = get_llm(model="openai/gpt-oss-120b", api_key="gsk_test_key_app", temperature=0.0)
 
         with patch("langchain_groq.ChatGroq.invoke", return_value=MagicMock(content="Summary of operating systems")) as mock_inv:
             summary = generate_document_summary(client, "Page 1 notes")
