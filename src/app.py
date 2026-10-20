@@ -321,7 +321,11 @@ if uploaded_file is not None:
                 from retriever import reload
 
                 # Document-isolated ingestion and vector-store workflow.
-                chunk_count = ingest_pdf(pdf_bytes, doc_id=file_id)
+                chunk_count = ingest_pdf(
+                    pdf_bytes,
+                    doc_id=file_id,
+                    source_name=uploaded_file.name,
+                )
                 reload(doc_id=file_id)
 
                 st.session_state.processed_file_id = file_id
@@ -440,50 +444,76 @@ if not st.session_state.document_ready:
 else:
     st.caption(f"Chatting with: {st.session_state.current_doc_name}")
 
-# ---------------------------------
-# Display Chat History — Existing Logic
-# ---------------------------------
+def _format_source_label(source_name: str | None, page_num: int | None) -> str:
+    """Format human-readable source attribution string for a retrieved chunk."""
+    if source_name and page_num is not None:
+        return f"{source_name} (Page {page_num})"
+    if source_name:
+        return f"{source_name}"
+    if page_num is not None:
+        return f"Page {page_num}"
+    return "Unknown source"
 
-for message in st.session_state.messages:
-    with st.chat_message(
-        message["role"],
-        avatar="👤" if message["role"] == "user" else "🤖",
-    ):
-        st.markdown(message["content"])
+
+def _render_source_attribution(sources: list[dict]):
+    """Render deduplicated source labels and detailed expandable chunk sources."""
+    if not sources:
+        return
+
+    # Deduplicate source/page labels in original retrieval order
+    seen = set()
+    unique_labels = []
+    for s in sources:
+        src = s.get("source")
+        pg = s.get("page")
+        key = (src, pg)
+        if key not in seen:
+            seen.add(key)
+            label = _format_source_label(src, pg)
+            if label != "Unknown source" or not unique_labels:
+                unique_labels.append(label)
+
+    if unique_labels:
+        st.caption("📍 **Sources:** " + ", ".join(unique_labels))
+
+    with st.expander("📄 View Sources"):
+        for i, s in enumerate(sources, start=1):
+            src = s.get("source")
+            pg = s.get("page")
+            header = f"### Source {i}"
+            if src and pg is not None:
+                header += f" — {src}, Page {pg}"
+            elif src:
+                header += f" — {src}"
+            elif pg is not None:
+                header += f" — Page {pg}"
+            st.markdown(header)
+            st.code(s.get("text", ""))
 
 
-# ---------------------------------
-# Chat Input — Existing Logic
-# ---------------------------------
+def build_chat_prompt(
+    question: str,
+    context: str,
+    history_messages: list[dict] | None = None,
+) -> str:
+    """
+    Construct the chat prompt for the LLM.
 
-question = st.chat_input("Ask a question about your PDF...")
-
-if question:
-    if not st.session_state.document_ready:
-        st.warning("Please upload a PDF before asking questions.")
-    else:
-        from retriever import retrieve
-
-        st.session_state.messages.append(
-            {"role": "user", "content": question}
-        )
-
-        with st.chat_message("user", avatar="👤"):
-            st.markdown(question)
-
-        with st.spinner("Searching document..."):
-            chunks = retrieve(question, doc_id=st.session_state.processed_file_id)
-
-        context = "\n\n".join(chunks)
-
+    Includes prior conversation history (excluding the current question),
+    retrieved document context, and the current question exactly once.
+    """
+    if history_messages:
         chat_history = "\n".join(
             [
                 f"{msg['role']}: {msg['content']}"
-                for msg in st.session_state.messages[-6:]
+                for msg in history_messages[-6:]
+                if msg.get("content")
             ]
         )
+    else:
+        chat_history = ""
 
-        prompt = f"""
+    return f"""
 You are a helpful study assistant.
 
 Use the conversation history and document context
@@ -504,18 +534,83 @@ say:
 I could not find that information in the document.
 """
 
+
+# ---------------------------------
+# Display Chat History — Existing Logic
+# ---------------------------------
+
+for message in st.session_state.messages:
+    with st.chat_message(
+        message["role"],
+        avatar="👤" if message["role"] == "user" else "🤖",
+    ):
+        st.markdown(message["content"])
+        if message["role"] == "assistant" and message.get("sources"):
+            _render_source_attribution(message["sources"])
+
+
+# ---------------------------------
+# Chat Input — Existing Logic
+# ---------------------------------
+
+question = st.chat_input("Ask a question about your PDF...")
+
+if question:
+    if not st.session_state.document_ready:
+        st.warning("Please upload a PDF before asking questions.")
+    else:
+        from retriever import retrieve_with_metadata
+
+        st.session_state.messages.append(
+            {"role": "user", "content": question}
+        )
+
+        with st.chat_message("user", avatar="👤"):
+            st.markdown(question)
+
+        with st.spinner("Searching document..."):
+            retrieved_docs = retrieve_with_metadata(
+                question,
+                doc_id=st.session_state.processed_file_id,
+            )
+
+        chunks = [
+            doc.page_content if hasattr(doc, "page_content") else str(doc)
+            for doc in retrieved_docs
+        ]
+        sources_data = [
+            {
+                "text": doc.page_content if hasattr(doc, "page_content") else str(doc),
+                "source": (getattr(doc, "metadata", {}) or {}).get("source"),
+                "page": (getattr(doc, "metadata", {}) or {}).get("page"),
+            }
+            for doc in retrieved_docs
+        ]
+
+        context = "\n\n".join(chunks)
+
+        # Prior conversation turns excluding the current question that was just appended
+        prior_messages = st.session_state.messages[:-1]
+
+        prompt = build_chat_prompt(
+            question=question,
+            context=context,
+            history_messages=prior_messages,
+        )
+
         with st.spinner("Generating answer..."):
             response = llm.invoke(prompt)
             answer = response.content
 
         st.session_state.messages.append(
-            {"role": "assistant", "content": answer}
+            {
+                "role": "assistant",
+                "content": answer,
+                "sources": sources_data,
+            }
         )
 
         with st.chat_message("assistant", avatar="🤖"):
             st.markdown(answer)
-
-            with st.expander("📄 View Sources"):
-                for i, chunk in enumerate(chunks, start=1):
-                    st.markdown(f"### Source {i}")
-                    st.code(chunk)
+            if sources_data:
+                _render_source_attribution(sources_data)

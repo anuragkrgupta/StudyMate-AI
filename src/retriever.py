@@ -1,6 +1,7 @@
 import os
 
 from langchain_community.vectorstores import FAISS
+from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 
 from config import (
@@ -84,7 +85,8 @@ def reload(doc_id: str | None = None):
     return _load(doc_id)
 
 
-def get_all_chunks(doc_id: str | None = None):
+def get_all_documents(doc_id: str | None = None) -> list[Document]:
+    """Retrieve all Document objects from the vector store in insertion order."""
     vs = _load(doc_id)
 
     if vs is None:
@@ -106,40 +108,55 @@ def get_all_chunks(doc_id: str | None = None):
         ]
 
         if hasattr(vs, "get_by_ids"):
-            docs = vs.get_by_ids(ordered_ids)
+            raw_docs = vs.get_by_ids(ordered_ids)
         else:
-            docs = [
+            raw_docs = [
                 vs.docstore.search(doc_id_key)
                 for doc_id_key in ordered_ids
             ]
 
-        chunks = []
-        for doc in docs:
-            if hasattr(doc, "page_content"):
-                chunks.append(doc.page_content)
+        docs = []
+        for doc in raw_docs:
+            if isinstance(doc, Document):
+                docs.append(doc)
+            elif hasattr(doc, "page_content"):
+                docs.append(Document(page_content=doc.page_content, metadata=getattr(doc, "metadata", {}) or {}))
             elif isinstance(doc, str) and not doc.startswith("ID "):
-                chunks.append(doc)
-        return chunks
+                docs.append(Document(page_content=doc, metadata={}))
+        return docs
 
     # Fallback to docstore values if index_to_docstore_id is not present or empty
     if hasattr(vs, "docstore") and hasattr(vs.docstore, "_dict"):
-        chunks = []
+        docs = []
         for doc in vs.docstore._dict.values():
-            if hasattr(doc, "page_content"):
-                chunks.append(doc.page_content)
+            if isinstance(doc, Document):
+                docs.append(doc)
+            elif hasattr(doc, "page_content"):
+                docs.append(Document(page_content=doc.page_content, metadata=getattr(doc, "metadata", {}) or {}))
             elif isinstance(doc, str) and not doc.startswith("ID "):
-                chunks.append(doc)
-        return chunks
+                docs.append(Document(page_content=doc, metadata={}))
+        return docs
 
     return []
 
 
-def retrieve(
-    query,
-    doc_id=None,
-    k=None,
-):
-    # Handle backward-compatible positional k call: retrieve(query, k)
+def get_all_chunks(doc_id: str | None = None) -> list[str]:
+    """Retrieve all chunk text strings belonging to the active document."""
+    docs = get_all_documents(doc_id=doc_id)
+    return [
+        doc.page_content
+        for doc in docs
+        if hasattr(doc, "page_content")
+    ]
+
+
+def retrieve_with_metadata(
+    query: str,
+    doc_id: str | None = None,
+    k: int | None = None,
+) -> list[Document]:
+    """Retrieve top-k Document objects with chunk content and page metadata."""
+    # Handle backward-compatible positional k call: retrieve_with_metadata(query, k)
     if isinstance(doc_id, int) and k is None:
         k = doc_id
         doc_id = None
@@ -153,7 +170,26 @@ def retrieve(
         k=k,
     )
 
+    return docs
+
+
+# Alias for metadata-aware retrieval
+retrieve_documents = retrieve_with_metadata
+
+
+def retrieve(
+    query,
+    doc_id=None,
+    k=None,
+):
+    """Retrieve top-k chunk text strings for backward compatibility."""
+    docs = retrieve_with_metadata(
+        query,
+        doc_id=doc_id,
+        k=k,
+    )
+
     return [
-        doc.page_content
+        doc.page_content if hasattr(doc, "page_content") else str(doc)
         for doc in docs
     ]

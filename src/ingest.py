@@ -47,7 +47,11 @@ def _get_pdf_bytes(source):
             source.seek(position)
 
 
-def ingest_pdf(source, doc_id: str | None = None) -> int:
+def ingest_pdf(
+    source,
+    doc_id: str | None = None,
+    source_name: str | None = None,
+) -> int:
     """
     Build a LangChain FAISS vector store from a PDF.
 
@@ -56,10 +60,23 @@ def ingest_pdf(source, doc_id: str | None = None) -> int:
     - Runs local handwriting OCR on individual pages lacking selectable text.
     - Enforces an OCR safety limit (at most 10 pages requiring OCR).
     - Rejects incomplete ingestion if OCR returns empty text for any scanned page.
+    - Preserves source filename, 1-based page number, and doc_id on every chunk.
     """
     reader = _read_pdf(source)
     if not reader.pages:
         raise ValueError("The PDF document contains no pages.")
+
+    resolved_source_name = None
+    if source_name and str(source_name).strip():
+        resolved_source_name = str(source_name).strip()
+    elif isinstance(source, (str, Path)):
+        resolved_source_name = Path(source).name
+    elif hasattr(source, "name") and getattr(source, "name"):
+        resolved_source_name = str(getattr(source, "name"))
+    elif doc_id and ":" in doc_id:
+        resolved_source_name = doc_id.rsplit(":", 1)[0]
+    else:
+        resolved_source_name = "document.pdf"
 
     # Identify which pages have selectable text and which need OCR
     selectable_texts = {}
@@ -80,12 +97,18 @@ def ingest_pdf(source, doc_id: str | None = None) -> int:
             f"or split the document into smaller parts."
         )
 
-    text_parts = []
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1500,
+        chunk_overlap=100,
+    )
+
+    all_chunks = []
+    all_metadatas = []
 
     for idx, page in enumerate(reader.pages):
         page_num = idx + 1
         if idx in selectable_texts:
-            text_parts.append(selectable_texts[idx])
+            page_text = selectable_texts[idx]
         else:
             print(f"Page {page_num}: No selectable text found. Running local handwriting OCR...")
             try:
@@ -113,32 +136,36 @@ def ingest_pdf(source, doc_id: str | None = None) -> int:
                     "Try a clearer scanned PDF."
                 )
 
-            text_parts.append(recognized_text)
+            page_text = recognized_text
 
-    full_text = "\n\n".join(text_parts).strip()
+        if not page_text or not page_text.strip():
+            continue
 
-    if not full_text:
+        page_chunks = splitter.split_text(page_text)
+        for chunk in page_chunks:
+            if chunk and chunk.strip():
+                all_chunks.append(chunk)
+                meta = {
+                    "source": resolved_source_name,
+                    "page": page_num,
+                }
+                if doc_id:
+                    meta["doc_id"] = doc_id
+                all_metadatas.append(meta)
+
+    if not all_chunks:
         raise ValueError("No usable text was found in the PDF.")
 
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1500,
-        chunk_overlap=100,
-    )
-
-    chunks = splitter.split_text(full_text)
-
-    if not chunks:
-        raise ValueError("No usable text was found in the PDF.")
-
-    print(f"Total Chunks: {len(chunks)}")
+    print(f"Total Chunks: {len(all_chunks)}")
 
     embeddings = HuggingFaceEmbeddings(
         model_name=EMBEDDING_MODEL
     )
 
     vectorstore = FAISS.from_texts(
-        texts=chunks,
+        texts=all_chunks,
         embedding=embeddings,
+        metadatas=all_metadatas,
     )
 
     target_dir = get_vectorstore_dir(doc_id, root_dir=VECTORSTORE_DIR)
@@ -156,7 +183,7 @@ def ingest_pdf(source, doc_id: str | None = None) -> int:
         else:
             raise
 
-    return len(chunks)
+    return len(all_chunks)
 
 
 if __name__ == "__main__":
