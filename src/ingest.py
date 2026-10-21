@@ -9,7 +9,7 @@ from langchain_community.vectorstores import FAISS
 
 from config import VECTORSTORE_DIR, EMBEDDING_MODEL, get_vectorstore_dir
 
-MAX_OCR_PAGES = 10
+MAX_OCR_PAGES = 50
 
 _embeddings = None
 _embeddings_cache = {}
@@ -103,7 +103,7 @@ def ingest_pdf(
     Processes each page independently:
     - Uses normal selectable-text extraction first.
     - Runs local handwriting OCR on individual pages lacking selectable text.
-    - Enforces an OCR safety limit (at most 10 pages requiring OCR).
+    - Enforces an OCR safety limit (at most 50 pages requiring OCR).
     - Rejects incomplete ingestion if OCR returns empty text for any scanned page.
     - Preserves source filename, 1-based page number, and doc_id on every chunk.
     """
@@ -156,6 +156,7 @@ def ingest_pdf(
             page_text = selectable_texts[idx]
         else:
             print(f"Page {page_num}: No selectable text found. Running local handwriting OCR...")
+            page_bytes = None
             try:
                 from handwriting_ocr import recognize_handwritten_pdf
 
@@ -164,6 +165,7 @@ def ingest_pdf(
                 page_buf = BytesIO()
                 writer.write(page_buf)
                 page_bytes = page_buf.getvalue()
+                del writer, page_buf
 
                 recognized_text = recognize_handwritten_pdf(
                     page_bytes,
@@ -174,6 +176,8 @@ def ingest_pdf(
                 raise ValueError(
                     f"Local handwriting recognition failed on page {page_num}: {exc}"
                 ) from exc
+            finally:
+                del page_bytes
 
             if not recognized_text or not recognized_text.strip():
                 raise ValueError(

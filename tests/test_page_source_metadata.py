@@ -146,7 +146,7 @@ class TestPageSourceMetadata(unittest.TestCase):
         doc_id = "os_mixed.pdf:def67890"
         source_name = "os_mixed.pdf"
 
-        def mock_ocr(page_bytes, max_pages=10, page_number_offset=0):
+        def mock_ocr(page_bytes, max_pages=50, page_number_offset=0):
             return f"Page {page_number_offset + 1} OCR: Handwritten Notes on Round Robin Scheduling"
 
         with patch("handwriting_ocr.recognize_handwritten_pdf", side_effect=mock_ocr) as mock_ocr_fn:

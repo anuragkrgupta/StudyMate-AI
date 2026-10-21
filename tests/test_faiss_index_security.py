@@ -224,7 +224,11 @@ class TestFaissIndexSecurity(unittest.TestCase):
         # Remove key configuration completely
         os.environ.pop("STUDYMATE_INDEX_SIGNING_KEY", None)
 
-        with patch.object(FAISS, "load_local") as mock_load_local:
+        mock_st = MagicMock()
+        mock_st.secrets.get.return_value = None
+
+        with patch.object(FAISS, "load_local") as mock_load_local, \
+             patch.dict("sys.modules", {"streamlit": mock_st}):
             with self.assertRaises(IndexSecurityError) as ctx:
                 _load()
 
@@ -431,7 +435,11 @@ class TestSigningKeyConfiguration(unittest.TestCase):
         os.environ.pop("STUDYMATE_INDEX_SIGNING_KEY", None)
         non_existent_env = Path(self.temp_dir) / "does_not_exist.env"
 
-        with patch("security.load_env_file"):
+        mock_st = MagicMock()
+        mock_st.secrets.get.return_value = None
+
+        with patch("security.load_env_file"), \
+             patch.dict("sys.modules", {"streamlit": mock_st}):
             with self.assertRaises(IndexSecurityError) as ctx:
                 get_signing_key()
 

@@ -103,13 +103,13 @@ def detect_text_lines(page_image):
     return crops
 
 
-def recognize_handwritten_pdf(pdf_bytes, max_pages=10, page_number_offset=0):
+def recognize_handwritten_pdf(pdf_bytes, max_pages=50, page_number_offset=0):
     """
     Extract handwritten text from a scanned PDF locally.
 
     Args:
         pdf_bytes (bytes): Raw bytes of the PDF to recognize.
-        max_pages (int, optional): Maximum number of pages allowed for OCR. Defaults to 10.
+        max_pages (int, optional): Maximum number of pages allowed for OCR. Defaults to 50.
         page_number_offset (int, optional): Zero-based offset added to page
             numbers in the output (e.g., page_number_offset=3 labels the first page
             in pdf_bytes as Page 4). Defaults to 0.
@@ -137,6 +137,7 @@ def recognize_handwritten_pdf(pdf_bytes, max_pages=10, page_number_offset=0):
             )
 
             lines = detect_text_lines(page_image)
+            del pixmap, page_image
             print(
                 f"Page {page_number}: "
                 f"detected {len(lines)} candidate text lines"
@@ -166,6 +167,8 @@ def recognize_handwritten_pdf(pdf_bytes, max_pages=10, page_number_offset=0):
                 if text:
                     print(f"Recognized: {text[:100]}")
                     recognized_lines.append(text)
+
+            del lines
 
             if recognized_lines:
                 results.append(

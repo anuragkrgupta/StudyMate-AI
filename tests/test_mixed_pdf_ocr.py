@@ -113,7 +113,7 @@ class TestMixedPdfOcrIngestion(unittest.TestCase):
         """
         pdf_bytes = make_pdf(["", ""])  # 2 scanned pages
 
-        def ocr_side_effect(page_bytes, max_pages=10, page_number_offset=0):
+        def ocr_side_effect(page_bytes, max_pages=50, page_number_offset=0):
             return f"[Page {page_number_offset + 1}]\nRecognized handwriting on page {page_number_offset + 1}"
 
         with patch("handwriting_ocr.recognize_handwritten_pdf", side_effect=ocr_side_effect) as mock_ocr:
@@ -155,7 +155,7 @@ class TestMixedPdfOcrIngestion(unittest.TestCase):
             "Page 3: Digital selectable lecture notes on Graph Traversals.",
         ])
 
-        def ocr_side_effect(page_bytes, max_pages=10, page_number_offset=0):
+        def ocr_side_effect(page_bytes, max_pages=50, page_number_offset=0):
             return f"[Page {page_number_offset + 1}]\nHandwritten notes for Quicksort partitioning."
 
         with patch("handwriting_ocr.recognize_handwritten_pdf", side_effect=ocr_side_effect) as mock_ocr:
@@ -199,7 +199,7 @@ class TestMixedPdfOcrIngestion(unittest.TestCase):
             "",  # Page 4 scanned
         ])
 
-        def ocr_side_effect(page_bytes, max_pages=10, page_number_offset=0):
+        def ocr_side_effect(page_bytes, max_pages=50, page_number_offset=0):
             return f"[Page {page_number_offset + 1}]\nHandwritten query tree diagram page {page_number_offset + 1}"
 
         with patch("handwriting_ocr.recognize_handwritten_pdf", side_effect=ocr_side_effect) as mock_ocr:
@@ -222,43 +222,102 @@ class TestMixedPdfOcrIngestion(unittest.TestCase):
             self.assertGreater(chunk_count, 0)
 
     # -------------------------------------------------------------------------
-    # Test E — OCR page limit
+    # Test E — OCR page limit (50-page safety limit)
     # -------------------------------------------------------------------------
-    def test_e_ocr_page_limit_exceeded(self):
+    def test_e1_ocr_10_pages_accepted(self):
         """
-        Input: A document with more than 10 pages requiring OCR (11 scanned pages).
+        Input: A document with 10 pages requiring OCR (boundary test for legacy limit).
         Expected:
-        - Ingestion stops safely with clear ValueError.
+        - Ingestion completes successfully.
+        - OCR is invoked exactly 10 times.
+        - Returns valid chunk count > 0.
+        """
+        pdf_bytes = make_pdf([""] * 10)  # 10 pages requiring OCR
+
+        def mock_ocr(page_bytes, max_pages=50, page_number_offset=0):
+            return f"[Page {page_number_offset + 1}]\nTranscribed text on page {page_number_offset + 1}"
+
+        with patch("handwriting_ocr.recognize_handwritten_pdf", side_effect=mock_ocr) as mock_ocr_fn:
+            chunk_count = ingest_pdf(pdf_bytes)
+            self.assertEqual(mock_ocr_fn.call_count, 10)
+            self.assertGreater(chunk_count, 0)
+
+    def test_e2_ocr_50_pages_accepted(self):
+        """
+        Input: A document with exactly 50 pages requiring OCR (the new maximum boundary).
+        Expected:
+        - Ingestion completes successfully.
+        - OCR is invoked exactly 50 times sequentially.
+        - Returns valid chunk count > 0.
+        """
+        pdf_bytes = make_pdf([""] * 50)  # 50 pages requiring OCR
+
+        def mock_ocr(page_bytes, max_pages=50, page_number_offset=0):
+            return f"[Page {page_number_offset + 1}]\nTranscribed text on page {page_number_offset + 1}"
+
+        with patch("handwriting_ocr.recognize_handwritten_pdf", side_effect=mock_ocr) as mock_ocr_fn:
+            chunk_count = ingest_pdf(pdf_bytes)
+            self.assertEqual(mock_ocr_fn.call_count, 50)
+            self.assertGreater(chunk_count, 0)
+
+    def test_e3_ocr_51_pages_rejected(self):
+        """
+        Input: A document with 51 pages requiring OCR (exceeds the 50-page limit).
+        Expected:
+        - Ingestion stops safely with a clear ValueError before running OCR.
+        - Error message explicitly states 51 pages requiring OCR and the 50-page limit.
         - Explains that the document should be split into smaller parts.
         - OCR is not called on any pages.
         """
-        pdf_bytes = make_pdf([""] * 11)  # 11 pages requiring OCR
+        pdf_bytes = make_pdf([""] * 51)  # 51 pages requiring OCR
+
+        with patch("handwriting_ocr.recognize_handwritten_pdf") as mock_ocr_fn:
+            with self.assertRaises(ValueError) as ctx:
+                ingest_pdf(pdf_bytes)
+
+            err = str(ctx.exception)
+            self.assertIn("51 pages requiring OCR", err)
+            self.assertIn("at most 50 pages requiring OCR", err)
+            self.assertIn("smaller parts", err)
+            mock_ocr_fn.assert_not_called()
+
+    def test_e4_mixed_pdf_counts_only_pages_requiring_ocr(self):
+        """
+        Input: A mixed document with 60 selectable-text pages and 50 scanned pages (110 total pages).
+        Expected:
+        - Not rejected despite total page count (110) > 50, because only 50 pages require OCR.
+        - Ingestion completes successfully.
+        - OCR invoked exactly 50 times for the 50 scanned pages.
+        """
+        pages = ["Selectable text on digital page " + str(i) for i in range(1, 61)]
+        pages.extend([""] * 50)  # 50 scanned pages
+        pdf_bytes = make_pdf(pages)
+
+        with patch("handwriting_ocr.recognize_handwritten_pdf", return_value="[Page X]\nNotes") as mock_ocr:
+            chunk_count = ingest_pdf(pdf_bytes)
+            self.assertEqual(mock_ocr.call_count, 50)
+            self.assertGreater(chunk_count, 0)
+
+    def test_e5_mixed_pdf_exceeding_ocr_limit_rejected(self):
+        """
+        Input: A mixed document with 20 selectable-text pages and 51 scanned pages (71 total pages).
+        Expected:
+        - Rejected because scanned pages (51) > 50.
+        - Error message identifies 51 pages requiring OCR.
+        - OCR is not called.
+        """
+        pages = ["Selectable text on digital page " + str(i) for i in range(1, 21)]
+        pages.extend([""] * 51)  # 51 scanned pages
+        pdf_bytes = make_pdf(pages)
 
         with patch("handwriting_ocr.recognize_handwritten_pdf") as mock_ocr:
             with self.assertRaises(ValueError) as ctx:
                 ingest_pdf(pdf_bytes)
 
-            self.assertIn("11 pages requiring OCR", str(ctx.exception))
-            self.assertIn("smaller parts", str(ctx.exception))
+            err = str(ctx.exception)
+            self.assertIn("51 pages requiring OCR", err)
+            self.assertIn("at most 50 pages requiring OCR", err)
             mock_ocr.assert_not_called()
-
-    def test_e_ocr_page_limit_allowed_with_many_text_pages(self):
-        """
-        Input: A document with 14 total pages: 12 selectable-text pages and 2 scanned pages.
-        Expected:
-        - Not rejected merely because total page count (14) > 10.
-        - Ingestion completes successfully.
-        - OCR invoked exactly 2 times for the 2 scanned pages.
-        """
-        pages = ["Selectable text content on digital page " + str(i) for i in range(1, 13)]
-        pages.append("")  # Page 13 scanned
-        pages.append("")  # Page 14 scanned
-        pdf_bytes = make_pdf(pages)
-
-        with patch("handwriting_ocr.recognize_handwritten_pdf", return_value="[Page X]\nNotes") as mock_ocr:
-            chunk_count = ingest_pdf(pdf_bytes)
-            self.assertEqual(mock_ocr.call_count, 2)
-            self.assertGreater(chunk_count, 0)
 
     # -------------------------------------------------------------------------
     # Test F — Empty OCR result
@@ -434,6 +493,28 @@ class TestMixedPdfOcrIngestion(unittest.TestCase):
             self.assertGreater(count_path, 0)
 
             mock_ocr.assert_not_called()
+
+    def test_h5_recognize_handwritten_pdf_default_max_pages_is_50(self):
+        """
+        Verify recognize_handwritten_pdf() defaults to max_pages=50:
+        50 pages accepted under the limit, 51 pages rejected.
+        """
+        mock_processor = MagicMock()
+        mock_model = MagicMock()
+
+        with patch("handwriting_ocr.load_handwriting_model", return_value=(mock_processor, mock_model, "cpu")), \
+             patch("handwriting_ocr.detect_text_lines", return_value=[]):
+            # 50 pages accepted without raising max_pages ValueError
+            pdf_bytes_50 = make_pdf([""] * 50)
+            res = recognize_handwritten_pdf(pdf_bytes_50)
+            self.assertEqual(res, "")
+
+            # 51 pages raises ValueError with default max_pages=50
+            pdf_bytes_51 = make_pdf([""] * 51)
+            with self.assertRaises(ValueError) as ctx:
+                recognize_handwritten_pdf(pdf_bytes_51)
+            self.assertIn("PDF has 51 pages", str(ctx.exception))
+            self.assertIn("at most 50 pages", str(ctx.exception))
 
 
 if __name__ == "__main__":
