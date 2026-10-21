@@ -25,13 +25,21 @@ st.set_page_config(
 # Existing LLM Configuration
 # ---------------------------------
 
-api_key = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
+try:
+    api_key = st.secrets.get("GROQ_API_KEY")
+except Exception:
+    api_key = None
 
-model = (
-    st.secrets.get("GROQ_MODEL")
-    or os.getenv("GROQ_MODEL")
-    or DEFAULT_GROQ_MODEL
-)
+if not api_key:
+    api_key = os.getenv("GROQ_API_KEY")
+
+try:
+    model = st.secrets.get("GROQ_MODEL")
+except Exception:
+    model = None
+
+if not model:
+    model = os.getenv("GROQ_MODEL") or DEFAULT_GROQ_MODEL
 
 
 @st.cache_resource
@@ -44,11 +52,30 @@ def get_llm(model: str, api_key: str | None = None, temperature: float = 0.0) ->
     )
 
 
-llm = get_llm(
-    model=model,
-    api_key=api_key,
-    temperature=0,
-)
+# Sidebar fallback if GROQ_API_KEY is not configured in secrets or environment
+if not api_key:
+    with st.sidebar:
+        st.markdown("### 🔑 API Key")
+        entered_key = st.text_input(
+            "Groq API Key",
+            type="password",
+            help="Enter your Groq API key (starts with gsk_). Get one free at https://console.groq.com/keys",
+            key="user_groq_key",
+        )
+        if entered_key and entered_key.strip():
+            api_key = entered_key.strip()
+
+llm = None
+if api_key:
+    try:
+        llm = get_llm(
+            model=model,
+            api_key=api_key,
+            temperature=0,
+        )
+    except Exception as exc:
+        st.error(f"Failed to initialize Groq LLM: {exc}")
+
 
 # ---------------------------------
 # UI Styling Only
@@ -284,6 +311,19 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+if not api_key:
+    st.warning(
+        "⚠️ **Groq API Key Required**\n\n"
+        "To enable AI document chat and summaries, configure your credentials:\n\n"
+        "- **On Streamlit Cloud**: Go to **Manage app** (bottom-right) or `⋮` > **Settings** > **Secrets**, and add:\n"
+        "  ```toml\n"
+        "  GROQ_API_KEY = \"gsk_your_groq_api_key\"\n"
+        "  STUDYMATE_INDEX_SIGNING_KEY = \"your_64_character_hex_signing_key\"\n"
+        "  ```\n"
+        "- **Quick Start**: You can also enter your Groq API Key in the left sidebar to start right away."
+    )
+
+
 # ---------------------------------
 # Document Upload
 # ---------------------------------
@@ -401,7 +441,9 @@ with chat_col:
 # ---------------------------------
 
 if generate_summary:
-    if not st.session_state.document_ready:
+    if not llm:
+        st.error("🔑 Groq API key is required to generate summaries. Please configure it in Streamlit Secrets or enter it in the sidebar.")
+    elif not st.session_state.document_ready:
         st.warning("Please upload a PDF first.")
     else:
         from retriever import get_all_chunks
@@ -569,7 +611,9 @@ for message in st.session_state.messages:
 question = st.chat_input("Ask a question about your PDF...")
 
 if question:
-    if not st.session_state.document_ready:
+    if not llm:
+        st.error("🔑 Groq API key is required to answer questions. Please configure it in Streamlit Secrets or enter it in the sidebar.")
+    elif not st.session_state.document_ready:
         st.warning("Please upload a PDF before asking questions.")
     else:
         from retriever import retrieve_with_metadata
