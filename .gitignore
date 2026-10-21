@@ -2,7 +2,6 @@ venv/
 env/
 venv312/
 .venv/
-.env.example
 
 __pycache__/
 *.pyc
